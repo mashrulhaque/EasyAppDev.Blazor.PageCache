@@ -6,6 +6,8 @@ using Microsoft.Extensions.Options;
 using EasyAppDev.Blazor.PageCache.Configuration;
 using EasyAppDev.Blazor.PageCache.Extensions;
 using EasyAppDev.Blazor.PageCache.Services;
+using EasyAppDev.Blazor.PageCache.Abstractions;
+using EasyAppDev.Blazor.PageCache.Validation;
 
 namespace EasyAppDev.Blazor.PageCache.Tests.Extensions;
 
@@ -256,5 +258,98 @@ public class ServiceCollectionExtensionsTests
         // Assert
         var options = provider.GetRequiredService<IOptions<PageCacheOptions>>().Value;
         options.CacheableStatusCodes.Should().Contain(new[] { 200, 404, 301 });
+    }
+
+    [Fact]
+    public void AddPageCache_AutoRegistersHtmlSanitizerValidator_WhenValidationEnabled()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // Act - Default configuration has EnableHtmlValidation = true
+        services.AddPageCache();
+        var provider = services.BuildServiceProvider();
+
+        // Assert
+        var validator = provider.GetService<IContentValidator>();
+        validator.Should().NotBeNull();
+        validator.Should().BeOfType<HtmlSanitizerValidator>();
+    }
+
+    [Fact]
+    public void AddPageCache_RegistersNoOpValidator_WhenValidationDisabled()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // Act
+        services.AddPageCache(options =>
+        {
+            options.Security.EnableHtmlValidation = false;
+        });
+        var provider = services.BuildServiceProvider();
+
+        // Assert
+        var validator = provider.GetService<IContentValidator>();
+        validator.Should().NotBeNull();
+        validator.Should().BeOfType<NoOpValidator>();
+    }
+
+    [Fact]
+    public void AddPageCache_ValidatorRegistration_IsSingleton()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // Act
+        services.AddPageCache();
+        var provider = services.BuildServiceProvider();
+
+        // Assert
+        var validator1 = provider.GetRequiredService<IContentValidator>();
+        var validator2 = provider.GetRequiredService<IContentValidator>();
+        validator1.Should().BeSameAs(validator2);
+    }
+
+    [Fact]
+    public async Task AddPageCache_RegisteredValidator_CanDetectXss()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddPageCache();
+        var provider = services.BuildServiceProvider();
+
+        // Act
+        var validator = provider.GetRequiredService<IContentValidator>();
+        var result = await validator.ValidateAsync(
+            "<button onclick='alert(1)'>Click</button>",
+            "test-key");
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Severity.Should().Be(ValidationSeverity.Critical);
+    }
+
+    [Fact]
+    public async Task AddPageCache_RegisteredValidator_AllowsSafeContent()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddPageCache();
+        var provider = services.BuildServiceProvider();
+
+        // Act
+        var validator = provider.GetRequiredService<IContentValidator>();
+        var result = await validator.ValidateAsync(
+            "<div><p>Hello World</p></div>",
+            "test-key");
+
+        // Assert
+        result.IsValid.Should().BeTrue();
     }
 }

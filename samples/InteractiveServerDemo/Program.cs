@@ -10,10 +10,8 @@ builder.Services.AddRazorComponents()
 // Add page caching
 builder.Services.AddPageCache(options =>
 {
-    options.Enabled = true;
-    options.DefaultDurationSeconds = 60; // 1 minute for testing
+    options.DefaultDurationSeconds = 300; // 5 minutes
     options.EnableStatistics = true;
-    options.MaxCacheSizeMB = 100;
 });
 
 var app = builder.Build();
@@ -28,12 +26,13 @@ if (!app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseStaticFiles();
+
 // Enable page cache middleware (must be before UseAntiforgery)
 app.UsePageCache();
 
 app.UseAntiforgery();
 
-app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

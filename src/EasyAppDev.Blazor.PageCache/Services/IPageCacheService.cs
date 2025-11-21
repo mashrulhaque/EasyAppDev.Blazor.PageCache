@@ -47,4 +47,26 @@ public interface IPageCacheService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A disposable lock that should be released after cache generation.</returns>
     Task<IDisposable> AcquireLockAsync(string cacheKey, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resets all cache statistics counters to zero and restarts the statistics collection timer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This method is thread-safe and can be called while the cache is actively serving requests.
+    /// All counters (hits, misses, evictions, bytes) are atomically reset to zero.
+    /// </para>
+    /// <para>
+    /// Use this method to:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>Prevent counter overflow (though overflow would take centuries under normal usage)</description></item>
+    /// <item><description>Start fresh statistics collection after a maintenance window</description></item>
+    /// <item><description>Clear statistics after configuration changes</description></item>
+    /// </list>
+    /// <para>
+    /// Note: This does not clear the cached content, only the statistics counters.
+    /// </para>
+    /// </remarks>
+    void ResetStatistics();
 }

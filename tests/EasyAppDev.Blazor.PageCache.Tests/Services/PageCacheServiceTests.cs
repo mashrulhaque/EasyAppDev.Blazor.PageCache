@@ -25,13 +25,13 @@ public class PageCacheServiceTests : IDisposable
     public PageCacheServiceTests()
     {
         _memoryCache = new MemoryCache(new MemoryCacheOptions());
-        _storage = new MemoryCacheStorage(_memoryCache);
         _options = new PageCacheOptions
         {
             Enabled = true,
             DefaultDurationSeconds = 60,
             EnableStatistics = true
         };
+        _storage = new MemoryCacheStorage(_memoryCache, Options.Create(_options));
         _locks = new AsyncKeyedLock();
         _loggerMock = new Mock<ILogger<PageCacheService>>();
         _events = new DefaultPageCacheEvents();
@@ -113,7 +113,7 @@ public class PageCacheServiceTests : IDisposable
     {
         // Arrange
         var options = new PageCacheOptions { Enabled = false };
-        var storage = new MemoryCacheStorage(_memoryCache);
+        var storage = new MemoryCacheStorage(_memoryCache, Options.Create(options));
         using var service = new PageCacheService(
             storage,
             Options.Create(options),
@@ -449,7 +449,7 @@ public class PageCacheServiceTests : IDisposable
     public void Constructor_NullCache_ThrowsArgumentNullException()
     {
         // Act
-        var act = () => new PageCacheService(null!, Options.Create(options), _locks, _loggerMock.Object, _events);
+        var act = () => new PageCacheService(null!, Options.Create(_options), _locks, _loggerMock.Object, _events);
 
         // Assert
         act.Should().Throw<ArgumentNullException>();
@@ -460,10 +460,11 @@ public class PageCacheServiceTests : IDisposable
     {
         // Act
         var act = () => new PageCacheService(
-            _memoryCache,
+            _storage,
             null!,
             _locks,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            _events);
 
         // Assert
         act.Should().Throw<ArgumentNullException>();
@@ -473,7 +474,7 @@ public class PageCacheServiceTests : IDisposable
     public void Constructor_NullLocks_ThrowsArgumentNullException()
     {
         // Act
-        var act = () => new PageCacheService(_storage, Options.Create(options), null!, _loggerMock.Object, _events);
+        var act = () => new PageCacheService(_storage, Options.Create(_options), null!, _loggerMock.Object, _events);
 
         // Assert
         act.Should().Throw<ArgumentNullException>();
@@ -483,7 +484,7 @@ public class PageCacheServiceTests : IDisposable
     public void Constructor_NullLogger_ThrowsArgumentNullException()
     {
         // Act
-        var act = () => new PageCacheService(_storage, Options.Create(options), _locks, null!, _events);
+        var act = () => new PageCacheService(_storage, Options.Create(_options), _locks, null!, _events);
 
         // Assert
         act.Should().Throw<ArgumentNullException>();

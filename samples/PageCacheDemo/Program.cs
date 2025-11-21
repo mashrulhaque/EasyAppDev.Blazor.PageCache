@@ -7,20 +7,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Add page caching with configuration
+// Add page caching
 builder.Services.AddPageCache(options =>
 {
-    options.Enabled = true;
-    options.DefaultDurationSeconds = 300; // 5 minutes default
+    options.DefaultDurationSeconds = 300; // 5 minutes
     options.EnableStatistics = true;
-    options.MaxCacheSizeMB = 100;
-    options.VaryByCulture = true;
-    options.CacheGenerationTimeoutSeconds = 30;
-
-    // Ignore tracking parameters
-    options.IgnoredQueryParameters.Add("utm_source");
-    options.IgnoredQueryParameters.Add("utm_medium");
-    options.IgnoredQueryParameters.Add("fbclid");
 });
 
 var app = builder.Build();
@@ -35,12 +26,13 @@ if (!app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseStaticFiles();
+
 // Enable page cache middleware (must be before UseAntiforgery)
 app.UsePageCache();
 
 app.UseAntiforgery();
 
-app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

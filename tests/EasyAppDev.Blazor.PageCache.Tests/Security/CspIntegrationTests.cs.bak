@@ -1,0 +1,433 @@
+using Xunit;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
+using EasyAppDev.Blazor.PageCache.Configuration;
+using EasyAppDev.Blazor.PageCache.Middleware;
+using EasyAppDev.Blazor.PageCache.Abstractions;
+using EasyAppDev.Blazor.PageCache.Security;
+
+namespace EasyAppDev.Blazor.PageCache.Tests.Security;
+
+/// <summary>
+/// Integration tests for CSP header injection in PageCacheServeMiddleware.
+/// </summary>
+public class CspIntegrationTests
+{
+    private readonly Mock<IPageCacheService> _mockCacheService;
+    private readonly Mock<ICacheKeyGenerator> _mockKeyGenerator;
+    private readonly PageCacheOptions _options;
+    private readonly NullLogger<PageCacheServeMiddleware> _logger;
+    private bool _nextCalled;
+
+    public CspIntegrationTests()
+    {
+        _mockCacheService = new Mock<IPageCacheService>();
+        _mockKeyGenerator = new Mock<ICacheKeyGenerator>();
+        _options = new PageCacheOptions();
+        _logger = NullLogger<PageCacheServeMiddleware>.Instance;
+        _nextCalled = false;
+    }
+
+    private PageCacheServeMiddleware CreateMiddleware()
+    {
+        return new PageCacheServeMiddleware(
+            next: _ =>
+            {
+                _nextCalled = true;
+                return Task.CompletedTask;
+            },
+            cacheService: _mockCacheService.Object,
+            keyGenerator: _mockKeyGenerator.Object,
+            options: Options.Create(_options),
+            logger: _logger);
+    }
+
+    private DefaultHttpContext CreateHttpContext()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = "GET";
+        context.Request.Path = "/test";
+        return context;
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithCspDisabled_DoesNotAddCspHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = false;
+        _options.Security.ContentSecurityPolicy = "default-src 'self';";
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy");
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy-Report-Only");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithCspEnabled_AddsCspHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+        var cspPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline';";
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = cspPolicy;
+        _options.Security.CspReportOnlyMode = false;
+        _options.Security.AddTimingJitter = false; // Disable for deterministic testing
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        context.Response.Headers.Should().ContainKey("Content-Security-Policy");
+        context.Response.Headers["Content-Security-Policy"].ToString().Should().Be(cspPolicy);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithCspReportOnlyMode_AddsReportOnlyHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+        var cspPolicy = "default-src 'self';";
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = cspPolicy;
+        _options.Security.CspReportOnlyMode = true;
+        _options.Security.AddTimingJitter = false;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        context.Response.Headers.Should().ContainKey("Content-Security-Policy-Report-Only");
+        context.Response.Headers["Content-Security-Policy-Report-Only"].ToString().Should().Be(cspPolicy);
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithEmptyCspPolicy_DoesNotAddHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = "";
+        _options.Security.AddTimingJitter = false;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy");
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy-Report-Only");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithNullCspPolicy_DoesNotAddHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = null;
+        _options.Security.AddTimingJitter = false;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy");
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy-Report-Only");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_OnCacheMiss_DoesNotAddCspHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns((string?)null);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = "default-src 'self';";
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        _nextCalled.Should().BeTrue("next middleware should be called on cache miss");
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithCspBuilderPolicy_AddsCorrectHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+
+        var cspPolicy = new CspBuilder()
+            .WithDefaultSrc("'self'")
+            .WithScriptSrc("'self'", "https://cdn.example.com")
+            .WithStyleSrc("'self'", "'unsafe-inline'")
+            .WithImgSrc("'self'", "data:", "https:")
+            .Build();
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = cspPolicy;
+        _options.Security.AddTimingJitter = false;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        context.Response.Headers["Content-Security-Policy"].ToString().Should().Be(cspPolicy);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithStrictCspPolicy_AddsStrictHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+
+        var cspPolicy = CspBuilder.CreateStrict(allowUnsafeInline: false).Build();
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = cspPolicy;
+        _options.Security.AddTimingJitter = false;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        var header = context.Response.Headers["Content-Security-Policy"].ToString();
+        header.Should().Contain("default-src 'self';");
+        header.Should().Contain("script-src 'self';");
+        header.Should().NotContain("'unsafe-inline'");
+        header.Should().NotContain("'unsafe-eval'");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithRelaxedCspPolicy_AddsRelaxedHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+
+        var cspPolicy = CspBuilder.CreateRelaxed().Build();
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = cspPolicy;
+        _options.Security.AddTimingJitter = false;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        var header = context.Response.Headers["Content-Security-Policy"].ToString();
+        header.Should().Contain("script-src 'self' 'unsafe-inline' 'unsafe-eval';");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithCspAndDebugHeaders_AddsBothHeaders()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+        var cspPolicy = "default-src 'self';";
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = cspPolicy;
+        _options.Security.ExposeDebugHeaders = true;
+        _options.Security.AddTimingJitter = false;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        context.Response.Headers.Should().ContainKey("Content-Security-Policy");
+        context.Response.Headers.Should().ContainKey("X-Page-Cache");
+        context.Response.Headers["Content-Security-Policy"].ToString().Should().Be(cspPolicy);
+        context.Response.Headers["X-Page-Cache"].ToString().Should().Be("HIT");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithComplexCspPolicy_AddsCompleteHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cacheKey = "test-key";
+        var cachedHtml = "<html><body>Cached content</body></html>";
+
+        var cspPolicy = new CspBuilder()
+            .WithDefaultSrc("'self'")
+            .WithScriptSrc("'self'", "https://scripts.example.com")
+            .WithStyleSrc("'self'", "https://styles.example.com")
+            .WithImgSrc("'self'", "data:", "https:")
+            .WithConnectSrc("'self'", "wss://websocket.example.com")
+            .WithFontSrc("'self'", "https://fonts.example.com")
+            .WithObjectSrc("'none'")
+            .WithMediaSrc("'self'")
+            .WithFrameSrc("'none'")
+            .WithFrameAncestors("'none'")
+            .WithBaseUri("'self'")
+            .WithFormAction("'self'")
+            .WithUpgradeInsecureRequests()
+            .WithReportUri("https://example.com/csp-report")
+            .Build();
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(true);
+        _mockKeyGenerator.Setup(x => x.GenerateKey(It.IsAny<HttpContext>())).Returns(cacheKey);
+        _mockCacheService.Setup(x => x.GetCachedHtml(cacheKey)).Returns(cachedHtml);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = cspPolicy;
+        _options.Security.AddTimingJitter = false;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        var header = context.Response.Headers["Content-Security-Policy"].ToString();
+        header.Should().Contain("default-src 'self';");
+        header.Should().Contain("script-src 'self' https://scripts.example.com;");
+        header.Should().Contain("style-src 'self' https://styles.example.com;");
+        header.Should().Contain("img-src 'self' data: https:;");
+        header.Should().Contain("connect-src 'self' wss://websocket.example.com;");
+        header.Should().Contain("font-src 'self' https://fonts.example.com;");
+        header.Should().Contain("object-src 'none';");
+        header.Should().Contain("media-src 'self';");
+        header.Should().Contain("frame-src 'none';");
+        header.Should().Contain("frame-ancestors 'none';");
+        header.Should().Contain("base-uri 'self';");
+        header.Should().Contain("form-action 'self';");
+        header.Should().Contain("upgrade-insecure-requests;");
+        header.Should().Contain("report-uri https://example.com/csp-report;");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_NonGetRequest_DoesNotAddCspHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        context.Request.Method = "POST";
+        var cspPolicy = "default-src 'self';";
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = cspPolicy;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        _nextCalled.Should().BeTrue("next middleware should be called for non-GET requests");
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_NonCacheableRequest_DoesNotAddCspHeader()
+    {
+        // Arrange
+        var context = CreateHttpContext();
+        var cspPolicy = "default-src 'self';";
+
+        _mockKeyGenerator.Setup(x => x.IsCacheable(It.IsAny<HttpContext>())).Returns(false);
+
+        _options.Security.EnableContentSecurityPolicy = true;
+        _options.Security.ContentSecurityPolicy = cspPolicy;
+
+        var middleware = CreateMiddleware();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        _nextCalled.Should().BeTrue("next middleware should be called for non-cacheable requests");
+        context.Response.Headers.Should().NotContainKey("Content-Security-Policy");
+    }
+}

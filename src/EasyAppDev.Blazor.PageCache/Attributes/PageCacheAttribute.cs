@@ -73,8 +73,20 @@ public sealed class PageCacheAttribute : Attribute
     /// authenticated users. Default is <c>false</c>.
     /// </summary>
     /// <remarks>
-    /// WARNING: Only enable this if the page content does not contain
-    /// user-specific information.
+    /// <para>
+    /// When enabled, the library automatically includes the user's identity in the cache key
+    /// to ensure each user gets their own cached version. The user identifier is obtained from:
+    /// 1. NameIdentifier claim (ClaimTypes.NameIdentifier)
+    /// 2. Name claim (ClaimTypes.Name)
+    /// 3. Identity.Name property
+    /// </para>
+    /// <para>
+    /// If no user identifier is found, caching will be refused to prevent data leakage.
+    /// </para>
+    /// <para>
+    /// WARNING: Only enable this if the page content is the same for all requests by a specific user.
+    /// Do not cache pages with time-sensitive data or user-specific information that changes frequently.
+    /// </para>
     /// </remarks>
     public bool CacheForAuthenticatedUsers { get; set; }
 }

@@ -183,11 +183,11 @@ public class PageCacheInvalidatorTests
         removed1.Should().Be(1);
         _mockCacheService.Verify(x => x.Remove(cacheKey), Times.Once);
 
-        // Act - try invalidating by second tag (should be gone)
+        // Act - try invalidating by second tag (should be cleaned up already)
         var removed2 = _invalidator.InvalidateByTag(tag2);
 
-        // Assert - tag should still exist but entry is already removed
-        removed2.Should().Be(1);
+        // Assert - tag should be cleaned up (entry was already removed by first tag)
+        removed2.Should().Be(0, "entry and all its tag associations should have been cleaned up by first invalidation");
     }
 
     [Fact]

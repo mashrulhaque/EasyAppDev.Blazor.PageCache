@@ -1,0 +1,404 @@
+using EasyAppDev.Blazor.PageCache.Attributes;
+using EasyAppDev.Blazor.PageCache.Configuration;
+using EasyAppDev.Blazor.PageCache.Services;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
+using Moq;
+using System.Security.Claims;
+using Xunit;
+
+namespace EasyAppDev.Blazor.PageCache.Tests.Services;
+
+/// <summary>
+/// Security integration tests to verify cache key injection protection in DefaultCacheKeyGenerator.
+/// </summary>
+[Trait("Category", TestCategories.Security)]
+[Trait("Category", TestCategories.Integration)]
+public class CacheKeyInjectionSecurityTests
+{
+    private readonly DefaultCacheKeyGenerator _keyGenerator;
+    private readonly PageCacheOptions _options;
+
+    public CacheKeyInjectionSecurityTests()
+    {
+        _options = new PageCacheOptions
+        {
+            CacheKeyPrefix = "PageCache:"
+        };
+
+        var loggerMock = new Mock<ILogger<DefaultCacheKeyGenerator>>();
+        _keyGenerator = new DefaultCacheKeyGenerator(
+            Options.Create(_options),
+            loggerMock.Object);
+    }
+
+    #region Route Value Injection Tests
+
+    [Fact]
+    public void GenerateKey_RouteValueWithWildcard_EscapesSpecialCharacters()
+    {
+        // Arrange
+        var context = CreateHttpContext("/product/details");
+        var routeData = new RouteData();
+        routeData.Values["id"] = "malicious*";
+        context.Features.Set<IRoutingFeature>(new RoutingFeature { RouteData = routeData });
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context);
+
+        // Assert
+        cacheKey.Should().Contain("malicious\\*");
+    }
+
+    [Fact]
+    public void GenerateKey_RouteValueWithPatternInjection_SanitizesPattern()
+    {
+        // Arrange
+        var context = CreateHttpContext("/user/profile");
+        var routeData = new RouteData();
+        routeData.Values["userId"] = "[0-9]*";
+        context.SetRouteData(routeData);
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context);
+
+        // Assert
+        cacheKey.Should().Contain("\\[0-9\\]\\*");
+    }
+
+    [Fact]
+    public void GenerateKey_RouteValueWithComplexPattern_FullySanitizes()
+    {
+        // Arrange
+        var context = CreateHttpContext("/api/data");
+        var routeData = new RouteData();
+        routeData.Values["filter"] = "^.*$|PageCache:*";
+        context.SetRouteData(routeData);
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context);
+
+        // Assert
+        cacheKey.Should().Contain("\\^\\.\\*\\$\\|pagecache:\\*");
+    }
+
+    #endregion
+
+    #region Query String Injection Tests
+
+    [Fact]
+    public void GenerateKey_QueryParameterWithWildcard_EscapesWildcard()
+    {
+        // Arrange
+        var context = CreateHttpContext("/search");
+        var query = new Dictionary<string, StringValues>
+        {
+            { "q", new StringValues("test*") }
+        };
+        context.Request.Query = new QueryCollection(query);
+
+        var attribute = new PageCacheAttribute
+        {
+            VaryByQueryKeys = new[] { "q" }
+        };
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context, attribute);
+
+        // Assert
+        cacheKey.Should().Contain("test\\*");
+    }
+
+    [Fact]
+    public void GenerateKey_QueryParameterWithMultipleWildcards_EscapesAll()
+    {
+        // Arrange
+        var context = CreateHttpContext("/search");
+        var query = new Dictionary<string, StringValues>
+        {
+            { "filter", new StringValues("*value?[a-z]*") }
+        };
+        context.Request.Query = new QueryCollection(query);
+
+        var attribute = new PageCacheAttribute
+        {
+            VaryByQueryKeys = new[] { "filter" }
+        };
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context, attribute);
+
+        // Assert
+        cacheKey.Should().Contain("\\*value\\?\\[a-z\\]\\*");
+    }
+
+    [Fact]
+    public void GenerateKey_QueryParameterInjectionAttempt_PreventsCachePoisoning()
+    {
+        // Arrange
+        var context1 = CreateHttpContext("/page");
+        var query1 = new Dictionary<string, StringValues> { { "id", new StringValues("1") } };
+        context1.Request.Query = new QueryCollection(query1);
+
+        var context2 = CreateHttpContext("/page");
+        var query2 = new Dictionary<string, StringValues> { { "id", new StringValues("*") } };
+        context2.Request.Query = new QueryCollection(query2);
+
+        var attribute = new PageCacheAttribute
+        {
+            VaryByQueryKeys = new[] { "id" }
+        };
+
+        // Act
+        var key1 = _keyGenerator.GenerateKey(context1, attribute);
+        var key2 = _keyGenerator.GenerateKey(context2, attribute);
+
+        // Assert
+        key1.Should().NotBe(key2);
+    }
+
+    #endregion
+
+    #region Header Injection Tests
+
+    [Fact]
+    public void GenerateKey_HeaderWithWildcard_EscapesWildcard()
+    {
+        // Arrange
+        var context = CreateHttpContext("/api/data");
+        context.Request.Headers["X-Custom-Filter"] = "value*";
+
+        var attribute = new PageCacheAttribute
+        {
+            VaryByHeader = "X-Custom-Filter"
+        };
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context, attribute);
+
+        // Assert
+        cacheKey.Should().Contain("value\\*");
+    }
+
+    [Fact]
+    public void GenerateKey_HeaderWithPatternInjection_Sanitizes()
+    {
+        // Arrange
+        var context = CreateHttpContext("/api/data");
+        context.Request.Headers["Accept-Language"] = "en-US|fr-FR|.*";
+
+        var attribute = new PageCacheAttribute
+        {
+            VaryByHeader = "Accept-Language"
+        };
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context, attribute);
+
+        // Assert
+        cacheKey.Should().Contain("en-us\\|fr-fr\\|\\.\\*");
+    }
+
+    #endregion
+
+    #region User Identity Injection Tests
+
+    [Fact]
+    public void GenerateKey_UserIdWithWildcard_EscapesWildcard()
+    {
+        // Arrange
+        var context = CreateHttpContext("/dashboard");
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, "user*123")
+        };
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var attribute = new PageCacheAttribute
+        {
+            CacheForAuthenticatedUsers = true
+        };
+
+        context.SetEndpoint(CreateEndpoint(attribute));
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context, attribute);
+
+        // Assert
+        cacheKey.Should().Contain("user\\*123");
+    }
+
+    [Fact]
+    public void GenerateKey_UserIdWithPatternInjection_Sanitizes()
+    {
+        // Arrange
+        var context = CreateHttpContext("/profile");
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, "admin|user[0-9]*")
+        };
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+
+        var attribute = new PageCacheAttribute
+        {
+            CacheForAuthenticatedUsers = true
+        };
+
+        context.SetEndpoint(CreateEndpoint(attribute));
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context, attribute);
+
+        // Assert
+        cacheKey.Should().Contain("admin\\|user\\[0-9\\]\\*");
+    }
+
+    [Fact]
+    public void GenerateKey_MaliciousUserIdToBypassAuth_CannotCollide()
+    {
+        // Arrange
+        var context1 = CreateHttpContext("/data");
+        var claims1 = new[] { new Claim(ClaimTypes.NameIdentifier, "user123") };
+        context1.User = new ClaimsPrincipal(new ClaimsIdentity(claims1, "TestAuth"));
+
+        var context2 = CreateHttpContext("/data");
+        var claims2 = new[] { new Claim(ClaimTypes.NameIdentifier, "user*") };
+        context2.User = new ClaimsPrincipal(new ClaimsIdentity(claims2, "TestAuth"));
+
+        var attribute = new PageCacheAttribute
+        {
+            CacheForAuthenticatedUsers = true
+        };
+
+        context1.SetEndpoint(CreateEndpoint(attribute));
+        context2.SetEndpoint(CreateEndpoint(attribute));
+
+        // Act
+        var key1 = _keyGenerator.GenerateKey(context1, attribute);
+        var key2 = _keyGenerator.GenerateKey(context2, attribute);
+
+        // Assert
+        key1.Should().NotBe(key2);
+    }
+
+    #endregion
+
+    #region Control Character Tests
+
+    [Fact]
+    public void GenerateKey_RouteValueWithControlCharacters_SanitizesControlChars()
+    {
+        // Arrange
+        var context = CreateHttpContext("/test");
+        var routeData = new RouteData();
+        routeData.Values["param"] = "value\nwith\nnewlines";
+        context.SetRouteData(routeData);
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context);
+
+        // Assert
+        cacheKey.Should().Contain("value_with_newlines");
+        cacheKey.Should().NotContain("\n");
+    }
+
+    [Fact]
+    public void GenerateKey_QueryWithTabCharacters_ReplacesWithUnderscore()
+    {
+        // Arrange
+        var context = CreateHttpContext("/search");
+        var query = new Dictionary<string, StringValues>
+        {
+            { "q", new StringValues("test\ttabs") }
+        };
+        context.Request.Query = new QueryCollection(query);
+
+        var attribute = new PageCacheAttribute
+        {
+            VaryByQueryKeys = new[] { "q" }
+        };
+
+        // Act
+        var cacheKey = _keyGenerator.GenerateKey(context, attribute);
+
+        // Assert
+        cacheKey.Should().Contain("test_tabs");
+        cacheKey.Should().NotContain("\t");
+    }
+
+    #endregion
+
+    #region Determinism and Collision Prevention
+
+    [Fact]
+    public void GenerateKey_SameInputWithInjection_ProducesSameKey()
+    {
+        // Arrange
+        var context1 = CreateHttpContext("/page");
+        var routeData1 = new RouteData();
+        routeData1.Values["id"] = "value*123";
+        context1.SetRouteData(routeData1);
+
+        var context2 = CreateHttpContext("/page");
+        var routeData2 = new RouteData();
+        routeData2.Values["id"] = "value*123";
+        context2.SetRouteData(routeData2);
+
+        // Act
+        var key1 = _keyGenerator.GenerateKey(context1);
+        var key2 = _keyGenerator.GenerateKey(context2);
+
+        // Assert
+        key1.Should().Be(key2);
+    }
+
+    [Fact]
+    public void GenerateKey_DifferentInjectionAttempts_ProduceDifferentKeys()
+    {
+        // Arrange
+        var inputs = new[] { "value*", "value?", "value[0]", "value.*", "value{1}" };
+        var contexts = inputs.Select(input =>
+        {
+            var ctx = CreateHttpContext("/test");
+            var routeData = new RouteData();
+            routeData.Values["param"] = input;
+            ctx.SetRouteData(routeData);
+            return ctx;
+        }).ToList();
+
+        // Act
+        var keys = contexts.Select(ctx => _keyGenerator.GenerateKey(ctx)).ToList();
+
+        // Assert
+        keys.Should().OnlyHaveUniqueItems();
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    private static HttpContext CreateHttpContext(string path)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = "GET";
+        context.Request.Path = path;
+        context.Request.Headers["Host"] = "localhost";
+        return context;
+    }
+
+    private static Endpoint CreateEndpoint(PageCacheAttribute attribute)
+    {
+        var metadata = new EndpointMetadataCollection(attribute);
+        return new Endpoint(
+            requestDelegate: null!,
+            metadata: metadata,
+            displayName: "TestEndpoint");
+    }
+
+    #endregion
+}

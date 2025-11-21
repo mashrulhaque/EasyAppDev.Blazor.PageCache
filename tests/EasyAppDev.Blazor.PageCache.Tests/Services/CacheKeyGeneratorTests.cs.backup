@@ -65,7 +65,7 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context);
 
         // Assert
-        cacheKey.Should().Be($"PageCache:/about:c:{expectedCulture}");
+        cacheKey.Should().Be($"PageCache:/about?c={expectedCulture}");
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context);
 
         // Assert
-        cacheKey.Should().Be($"PageCache:/:c:{expectedCulture}");
+        cacheKey.Should().Be($"PageCache:/?c={expectedCulture}");
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context);
 
         // Assert
-        cacheKey.Should().Be($"PageCache:/about:c:{expectedCulture}");
+        cacheKey.Should().Be($"PageCache:/about?c={expectedCulture}");
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context);
 
         // Assert
-        cacheKey.Should().Be($"PageCache:/about/contact:c:{expectedCulture}");
+        cacheKey.Should().Be($"PageCache:/about/contact?c={expectedCulture}");
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class CacheKeyGeneratorTests
             varyByQueryKeys: new[] { "page", "category" });
 
         // Assert
-        cacheKey.Should().Contain(":qs:category:tech:page:2");
+        cacheKey.Should().Contain("?qs=category=tech&page=2");
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public class CacheKeyGeneratorTests
             varyByQueryKeys: new[] { "zebra", "apple", "banana" });
 
         // Assert
-        cacheKey.Should().Contain("apple:2:banana:3:zebra:1");
+        cacheKey.Should().Contain("apple=2&banana=3&zebra=1");
     }
 
     [Fact]
@@ -155,7 +155,7 @@ public class CacheKeyGeneratorTests
             varyByQueryKeys: new[] { "page", "utm_source" });
 
         // Assert
-        cacheKey.Should().Contain("page:2");
+        cacheKey.Should().Contain("page=2");
         cacheKey.Should().NotContain("utm_source");
         cacheKey.Should().NotContain("google");
     }
@@ -173,43 +173,10 @@ public class CacheKeyGeneratorTests
             varyByQueryKeys: new[] { "page", "utm_source", "utm_campaign", "fbclid" });
 
         // Assert
-        cacheKey.Should().Contain("page:2");
+        cacheKey.Should().Contain("page=2");
         cacheKey.Should().NotContain("utm_source");
         cacheKey.Should().NotContain("utm_campaign");
         cacheKey.Should().NotContain("fbclid");
-    }
-
-    [Fact]
-    public void GenerateCacheKey_WithIgnoredParametersContainingSpecialCharacters_ExcludesThemBeforeSanitization()
-    {
-        // Arrange - Test Issue 1.5 fix
-        // This test verifies that ignored parameters are checked BEFORE sanitization
-        // so that parameter names with special characters can be properly ignored
-        // Add a custom parameter with special chars to the ignore list
-        _options.IgnoredQueryParameters.Add("special-param");
-
-        var context = CreateHttpContext("/blog");
-        context.Request.QueryString = new QueryString("?page=2&utm_source=<script>&special-param=value");
-
-        // Act
-        var cacheKey = _generator.GenerateKey(
-            context,
-            varyByQueryKeys: new[] { "page", "utm_source", "special-param" });
-
-        // Assert
-        // Page should be included (not ignored)
-        cacheKey.Should().Contain("page:2");
-
-        // utm_source should be excluded (it's in the default ignored list)
-        // Even though the value contains <script>, the ignore check happens before sanitization
-        cacheKey.Should().NotContain("utm_source");
-        cacheKey.Should().NotContain("utm");
-
-        // special-param should be excluded (we added it to ignored list)
-        // The hyphen in the parameter name would be affected by sanitization if it were processed,
-        // but the ignore check should happen before that, ensuring it's properly excluded
-        cacheKey.Should().NotContain("special");
-        cacheKey.Should().NotContain("param");
     }
 
     [Fact]
@@ -225,7 +192,7 @@ public class CacheKeyGeneratorTests
             varyByHeader: "Accept-Language");
 
         // Assert
-        cacheKey.Should().Contain(":h:accept-language:es-es");
+        cacheKey.Should().Contain("?h=accept-language=es-es");
     }
 
     [Fact]
@@ -241,7 +208,7 @@ public class CacheKeyGeneratorTests
             varyByHeader: "Accept-Language");
 
         // Assert
-        cacheKey.Should().Contain(":h:accept-language:en-us");
+        cacheKey.Should().Contain("?h=accept-language=en-us");
     }
 
     [Fact]
@@ -272,7 +239,7 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context);
 
         // Assert
-        cacheKey.Should().Contain(":rv:slug:my-post");
+        cacheKey.Should().Contain("?rv=slug=my-post");
     }
 
     [Fact]
@@ -289,7 +256,7 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context);
 
         // Assert
-        cacheKey.Should().Contain(":rv:category:tech:slug:article-1");
+        cacheKey.Should().Contain("?rv=category=tech&slug=article-1");
     }
 
     [Fact]
@@ -306,8 +273,8 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context);
 
         // Assert
-        cacheKey.Should().NotContain("page:");
-        cacheKey.Should().Contain("slug:test");
+        cacheKey.Should().NotContain("page=");
+        cacheKey.Should().Contain("slug=test");
     }
 
     [Fact]
@@ -321,7 +288,7 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context);
 
         // Assert
-        cacheKey.Should().Contain($":c:{expectedCulture}");
+        cacheKey.Should().Contain($"?c={expectedCulture}");
     }
 
     [Fact]
@@ -336,7 +303,7 @@ public class CacheKeyGeneratorTests
 
         // Assert
         cacheKey.Should().Be("PageCache:/about");
-        cacheKey.Should().NotContain(":c:");
+        cacheKey.Should().NotContain("?c=");
     }
 
     [Fact]
@@ -372,9 +339,9 @@ public class CacheKeyGeneratorTests
 
         // Assert
         cacheKey.Should().Contain("/blog/my-post");
-        cacheKey.Should().Contain("rv:slug:my-post");
-        cacheKey.Should().Contain("qs:page:2:sort:asc");
-        cacheKey.Should().Contain("h:accept-language:es-es");
+        cacheKey.Should().Contain("rv=slug=my-post");
+        cacheKey.Should().Contain("qs=page=2&sort=asc");
+        cacheKey.Should().Contain("h=accept-language=es-es");
     }
 
     [Fact]
@@ -505,8 +472,8 @@ public class CacheKeyGeneratorTests
 
         // Assert
         cacheKey.Should().Contain("/dashboard");
-        cacheKey.Should().Contain(":uid:user123");
-        cacheKey.Should().Contain($":c:{expectedCulture}");
+        cacheKey.Should().Contain("?uid=user123");
+        cacheKey.Should().Contain($"c={expectedCulture}");
     }
 
     [Fact]
@@ -570,7 +537,7 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context, cacheForAuthenticatedUsers: true);
 
         // Assert
-        cacheKey.Should().Contain(":uid:nameidentifier123");
+        cacheKey.Should().Contain("uid=nameidentifier123");
         cacheKey.Should().NotContain("name456");
     }
 
@@ -587,7 +554,7 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context, cacheForAuthenticatedUsers: true);
 
         // Assert
-        cacheKey.Should().Contain(":uid:username123");
+        cacheKey.Should().Contain("uid=username123");
     }
 
     [Fact]
@@ -603,8 +570,8 @@ public class CacheKeyGeneratorTests
         var cacheKey = _generator.GenerateKey(context, cacheForAuthenticatedUsers: true);
 
         // Assert
-        cacheKey.Should().Contain(":uid:USER123");
-        cacheKey.Should().NotContain(":uid:user123");
+        cacheKey.Should().Contain("uid=USER123");
+        cacheKey.Should().NotContain("uid=user123");
     }
 
     [Fact]
@@ -623,8 +590,8 @@ public class CacheKeyGeneratorTests
 
         // Assert
         keyUpperCase.Should().NotBe(keyLowerCase);
-        keyUpperCase.Should().Contain(":uid:Admin");
-        keyLowerCase.Should().Contain(":uid:admin");
+        keyUpperCase.Should().Contain("uid=Admin");
+        keyLowerCase.Should().Contain("uid=admin");
     }
 
     [Fact]
@@ -674,9 +641,9 @@ public class CacheKeyGeneratorTests
 
         // Assert
         cacheKey.Should().Contain("/dashboard");
-        cacheKey.Should().Contain("qs:page:2");
-        cacheKey.Should().Contain("h:accept-language:es-es");
-        cacheKey.Should().Contain(":uid:user123");
+        cacheKey.Should().Contain("qs=page=2");
+        cacheKey.Should().Contain("h=accept-language=es-es");
+        cacheKey.Should().Contain("uid=user123");
     }
 
     private static DefaultHttpContext CreateHttpContext(string path)
