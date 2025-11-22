@@ -22,9 +22,11 @@ public class PageCacheInvalidatorTests
         };
 
         _invalidator = new PageCacheInvalidator(
-            _mockCacheService.Object,
             Options.Create(_options),
             NullLogger<PageCacheInvalidator>.Instance);
+
+        // Set the cache service after construction to match production code
+        _invalidator.SetCacheService(_mockCacheService.Object);
     }
 
     [Fact]

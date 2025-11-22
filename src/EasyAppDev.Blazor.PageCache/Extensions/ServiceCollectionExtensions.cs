@@ -106,8 +106,15 @@ public static class ServiceCollectionExtensions
             return new Validation.NoOpValidator();
         });
 
-        // Register PageCacheInvalidator first (no dependencies on PageCacheService)
-        services.TryAddSingleton<IPageCacheInvalidator, PageCacheInvalidator>();
+        // FIX: Register PageCacheInvalidator with factory to break circular dependency
+        // The invalidator is created without the cache service, then the cache service is set later
+        services.TryAddSingleton<IPageCacheInvalidator>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<PageCacheOptions>>();
+            var logger = sp.GetRequiredService<ILogger<PageCacheInvalidator>>();
+            var invalidator = new PageCacheInvalidator(options, logger);
+            return invalidator;
+        });
 
         // IMPORTANT: PageCacheService MUST be registered as Singleton
         // Rationale:
@@ -120,7 +127,7 @@ public static class ServiceCollectionExtensions
         //    This only works correctly when all requests share the same lock instance.
         // 4. Performance: Creating new instances per request/scope would be wasteful for a caching service.
         //
-        // PHASE 4: Register with factory to wire up invalidator for statistics integration
+        // FIX: Create service and wire up bidirectional dependencies to break circular dependency
         services.TryAddSingleton<IPageCacheService>(sp =>
         {
             var storage = sp.GetRequiredService<ICacheStorage>();
@@ -133,9 +140,17 @@ public static class ServiceCollectionExtensions
 
             var service = new PageCacheService(storage, options, locks, logger, events, compression, validator, sp);
 
-            // Wire up invalidator for statistics integration after service creation
+            // Wire up bidirectional dependencies after both services are constructed
             var invalidator = sp.GetRequiredService<IPageCacheInvalidator>();
+
+            // Set invalidator in service for statistics integration
             service.SetInvalidator(invalidator);
+
+            // Set cache service in invalidator to break circular dependency
+            if (invalidator is PageCacheInvalidator concreteInvalidator)
+            {
+                concreteInvalidator.SetCacheService(service);
+            }
 
             return service;
         });

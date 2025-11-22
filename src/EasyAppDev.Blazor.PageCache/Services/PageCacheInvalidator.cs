@@ -11,7 +11,8 @@ namespace EasyAppDev.Blazor.PageCache.Services;
 /// </summary>
 public sealed partial class PageCacheInvalidator : IPageCacheInvalidator
 {
-    private readonly IPageCacheService _cacheService;
+    // FIX: Made non-readonly to allow SetCacheService to break circular dependency
+    private IPageCacheService _cacheService;
     private readonly PageCacheOptions _options;
     private readonly ILogger<PageCacheInvalidator> _logger;
 
@@ -30,13 +31,23 @@ public sealed partial class PageCacheInvalidator : IPageCacheInvalidator
     private DateTimeOffset? _lastInvalidationTime;
 
     public PageCacheInvalidator(
-        IPageCacheService cacheService,
         IOptions<PageCacheOptions> options,
         ILogger<PageCacheInvalidator> logger)
     {
-        _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
+        // FIX: Removed IPageCacheService from constructor to break circular dependency
+        // The service will be set via SetCacheService() method after both services are constructed
+        _cacheService = null!; // Will be set via SetCacheService
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Sets the cache service reference. This is called during service registration
+    /// to break the circular dependency between PageCacheInvalidator and PageCacheService.
+    /// </summary>
+    public void SetCacheService(IPageCacheService cacheService)
+    {
+        _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
     }
 
     /// <inheritdoc />

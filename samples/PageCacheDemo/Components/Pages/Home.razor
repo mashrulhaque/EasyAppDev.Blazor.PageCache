@@ -110,8 +110,7 @@
     options.EnableStatistics = true;
 });
 
-app.MapRazorComponents&lt;App&gt;()
-    .AddPageCacheFilter();</code></pre>
+app.UsePageCache(); // Add before UseAntiforgery()</code></pre>
 
         <h6 class="mt-3">3. Add to Your Pages</h6>
         <pre><code>@@page "/about"

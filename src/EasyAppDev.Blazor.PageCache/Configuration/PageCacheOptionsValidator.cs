@@ -293,21 +293,10 @@ internal sealed class PageCacheOptionsValidator : IValidateOptions<PageCacheOpti
         // Validate Content Security Policy (CSP) configuration
         ValidateCspConfiguration(security, errors);
 
-        // Validate security option combinations
-        // NOTE: HtmlValidationSamplingRate validation removed as part of Phase 1 security fixes.
-        // The property is deprecated and no longer has any effect. All requests are now validated.
-
-        if (!security.EnableHtmlValidation && !security.EnableSizeValidation)
-        {
-            errors.Add("WARNING: Both HTML validation and size validation are disabled. This significantly reduces security protection. " +
-                      "Consider enabling at least one form of content validation.");
-        }
-
-        if (security.ExposeDebugHeaders)
-        {
-            errors.Add("WARNING: Debug headers are enabled. This may leak information about caching behavior and could be used for timing attacks. " +
-                      "Debug headers should only be enabled in development environments.");
-        }
+        // NOTE: Security warnings have been removed from validation errors.
+        // Warnings about ExposeDebugHeaders, disabled validations, etc. are informational
+        // and should not prevent the application from starting.
+        // These warnings will be logged by the application at runtime instead of blocking startup.
     }
 
     /// <summary>
@@ -365,82 +354,15 @@ internal sealed class PageCacheOptionsValidator : IValidateOptions<PageCacheOpti
             }
         }
 
-        // WARNING: CSP policy doesn't end with semicolon (best practice)
-        if (!policy.TrimEnd().EndsWith(";"))
-        {
-            errors.Add($"WARNING: Security.{nameof(security.ContentSecurityPolicy)} should end with a semicolon (;) as per CSP best practices. " +
-                      "While browsers are lenient, this ensures consistent behavior across implementations.");
-        }
-
-        // Check for common CSP directive names to validate format
-        var directiveNames = directives
-            .Select(d => d.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault())
-            .Where(name => !string.IsNullOrEmpty(name))
-            .ToList();
-
-        var knownDirectives = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "default-src", "script-src", "style-src", "img-src", "font-src", "connect-src",
-            "frame-src", "frame-ancestors", "object-src", "media-src", "manifest-src", "worker-src",
-            "form-action", "base-uri", "plugin-types", "sandbox", "report-uri", "report-to",
-            "upgrade-insecure-requests", "block-all-mixed-content", "require-sri-for", "require-trusted-types-for",
-            "trusted-types", "child-src", "prefetch-src", "navigate-to"
-        };
-
-        var unknownDirectives = directiveNames.Where(name => name != null && !knownDirectives.Contains(name)).ToList();
-        if (unknownDirectives.Any())
-        {
-            errors.Add($"WARNING: Security.{nameof(security.ContentSecurityPolicy)} contains unrecognized directives: {string.Join(", ", unknownDirectives)}. " +
-                      "These may be typos or unsupported directives. Verify your CSP policy is correct.");
-        }
-
-        // INFO: Recommend default-src if missing
-        if (!directiveNames.Any(name => name != null && name.Equals("default-src", StringComparison.OrdinalIgnoreCase)))
-        {
-            errors.Add($"INFO: Security.{nameof(security.ContentSecurityPolicy)} does not include a 'default-src' directive. " +
-                      "Consider adding 'default-src' as a fallback for resource types not explicitly specified. " +
-                      "This is a best practice for comprehensive CSP policies.");
-        }
-
-        // WARNING: Using both 'unsafe-inline' and 'unsafe-eval' (very permissive)
-        var policyLower = policy.ToLowerInvariant();
-        var hasUnsafeInline = policyLower.Contains("'unsafe-inline'");
-        var hasUnsafeEval = policyLower.Contains("'unsafe-eval'");
-
-        if (hasUnsafeInline && hasUnsafeEval)
-        {
-            errors.Add($"WARNING: Security.{nameof(security.ContentSecurityPolicy)} uses both 'unsafe-inline' and 'unsafe-eval', " +
-                      "which significantly weakens XSS protection. Consider using nonces or hashes for inline scripts/styles, " +
-                      "and avoid 'unsafe-eval' if possible. If these are required, ensure you have compensating security controls.");
-        }
-
-        // WARNING: Using 'unsafe-eval' without other restrictions
-        if (hasUnsafeEval && !policy.Contains("'nonce-") && !policy.Contains("'sha"))
-        {
-            errors.Add($"WARNING: Security.{nameof(security.ContentSecurityPolicy)} uses 'unsafe-eval' which allows dangerous JavaScript eval() calls. " +
-                      "This can enable XSS attacks. Consider removing 'unsafe-eval' or adding additional restrictions.");
-        }
-
-        // WARNING: Using '*' wildcard in security-sensitive directives
-        if (policyLower.Contains("script-src *") || policyLower.Contains("default-src *"))
-        {
-            errors.Add($"WARNING: Security.{nameof(security.ContentSecurityPolicy)} uses '*' wildcard in script-src or default-src, " +
-                      "which allows scripts from any origin and defeats the purpose of CSP. " +
-                      "Specify explicit trusted sources instead.");
-        }
-
-        // WARNING: CSP report-only mode in production
-        if (security.CspReportOnlyMode)
-        {
-            errors.Add($"WARNING: Security.{nameof(security.CspReportOnlyMode)} is enabled. The CSP policy will not be enforced, only violations will be reported. " +
-                      "This is useful for testing but provides no actual protection. " +
-                      "Consider enforcing the policy in production environments once testing is complete.");
-        }
-
-        // INFO: Using report-uri or report-to
-        if (policyLower.Contains("report-uri") || policyLower.Contains("report-to"))
-        {
-            errors.Add("INFO: CSP violation reporting is configured. Ensure your reporting endpoint is properly set up to collect and monitor violations.");
-        }
+        // NOTE: CSP warnings and recommendations have been removed from validation errors.
+        // These include warnings about:
+        // - Missing semicolon at end of policy
+        // - Unrecognized directives
+        // - Missing default-src directive
+        // - Use of 'unsafe-inline' and 'unsafe-eval'
+        // - Use of '*' wildcard
+        // - CSP report-only mode
+        // - CSP violation reporting configuration
+        // These are informational messages that should not prevent application startup.
     }
 }

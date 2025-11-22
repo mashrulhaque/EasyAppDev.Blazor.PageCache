@@ -34,8 +34,8 @@ public static class CacheKeySanitizer
         '\n', '\r', '\t', '\0',
         // Space character needs escaping to prevent injection
         ' ',
-        // Semicolon, ampersand, and equals for command/query injection
-        ';', '&', '='
+        // Semicolon, ampersand, equals, and comma for command/query injection
+        ';', '&', '=', ','
     };
 
     /// <summary>

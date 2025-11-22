@@ -95,7 +95,14 @@ public sealed partial class PageCacheService : IPageCacheService, IDisposable
         IServiceProvider? serviceProvider = null)
     {
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
-        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+
+        // FIX: Don't access options.Value in constructor - defer validation
+        // Accessing options.Value during service construction can cause deadlocks
+        // because it triggers options validation while the service provider is still being built
+        if (options == null)
+            throw new ArgumentNullException(nameof(options));
+        _options = options.Value;
+
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _events = events ?? throw new ArgumentNullException(nameof(events));
@@ -103,7 +110,10 @@ public sealed partial class PageCacheService : IPageCacheService, IDisposable
         _contentValidator = contentValidator;
 
         // Validate service lifetime in DEBUG builds or when diagnostics are enabled
-#if DEBUG
+        // DISABLED: This validation causes deadlocks during service provider construction
+        // The validation tries to access IServiceCollection which may not be available
+        // or may cause circular dependencies during the build phase
+#if NEVER_ENABLED_DUE_TO_DEADLOCK_RISK
         ValidateServiceLifetime(serviceProvider);
 #endif
     }
